@@ -9,10 +9,17 @@ originYaw = 0
 didCalibrate = false
 myo.setLockingPolicy("none")
 
+FORWARD_THRESHOLD = 0.174533
+tempForwardThreshold = FORWARD_THRESHOLD
+TURN_THRESHOLD = .25
+BRAKE_THRESHOLD = 0.872665
+JUMP_THRESHOLD = 1.3
+
+--jumpTimer allows the user time after jumping to get into coast position
+jumpTimer = 0
+
 function onForegroundWindowChange(app, title)
     if (app == "RocketLeague.exe") then
-        myo.debug("Rocket League Active ")
-        myo.debug("didCalibrate: " .. tostring(didCalibrate))
         return true
     end
 end
@@ -24,39 +31,69 @@ end
 
 function onPeriodic()
     if (didCalibrate == true) then
+
         --If the pitch is within a certain threshold, drive forward
-        if ((myo.getPitch() <= originPitch + 0.174533) and (myo.getPitch() >= originPitch - 0.174533)) then
-            myo.keyboard("w","down")
-            myo.debug("Forward Detected")
+        if ((myo.getPitch() <= originPitch + tempForwardThreshold) and (myo.getPitch() >= originPitch - tempForwardThreshold)) then
+            if ((myo.getYaw() < originYaw + .15) or (myo.getYaw() > originYaw - .15)) then
+                myo.keyboard("w","down")
+            end
+
         end
 
         --Roll changes indicate turns
-        if (myo.getRoll() > originRoll + .25) then
+        if (myo.getRoll() > originRoll + TURN_THRESHOLD) then
             myo.keyboard("d", "down")
-            myo.debug("right Detected")
+
         end
 
-        if (myo.getRoll() < originRoll - 0.25) then
+        if (myo.getRoll() < originRoll - TURN_THRESHOLD) then
             myo.keyboard("a","down")
-            myo.debug("Left Detected")
+
         end
 
-        if ((myo.getRoll() <= originRoll + .25) and (myo.getRoll() >= originRoll - 0.25)) then
+        if ((myo.getRoll() <= originRoll + TURN_THRESHOLD) and (myo.getRoll() >= originRoll - TURN_THRESHOLD)) then
             myo.keyboard("a","up")
             myo.keyboard("d","up")
         end
 
         --Pitch change of 10 degrees upward indicates coasting
-        if (myo.getPitch() > originPitch + 0.174533) then
+        if (myo.getPitch() > originPitch + FORWARD_THRESHOLD) then
+            myo.keyboard("w","up")
+        end
+
+        --Yaw Change of .25 radians indicates coasting
+        if ((myo.getYaw() > originYaw + .15) or (myo.getYaw() < originYaw - .15)) then
             myo.keyboard("w","up")
         end
 
         --Pitch change 50 degrees upward indicates braking
-        if (myo.getPitch() > originPitch + 0.872665) then
+        if (myo.getPitch() > originPitch + BRAKE_THRESHOLD) then
             myo.keyboard("w","up")
             myo.keyboard("s", "press")
-            myo.debug("Brake Detected")
         end
+
+        x,y,z = myo.getGyro()
+        if (jumpTimer == 0) then
+            if ((y > 100) or (z > 100)) then
+                myo.mouse("right","click")
+                jumpTimer = 30
+            end
+        end
+
+        if (jumpTimer > 0) then
+            jumpTimer = jumpTimer - 1
+        end
+
+        -- x,y,z = myo.getAccelWorld()
+        -- if (z >= JUMP_THRESHOLD) then
+        --     myo.mouse("right", "click")
+        --     jumpTimer = 100
+        -- end
+
+        -- if (jumpTimer > 0) then
+        --     jumpTimer = jumpTimer - 1
+        --     myo.debug("jumpTimer: " ..jumpTimer)
+        -- end
     end
 end
 
@@ -75,19 +112,19 @@ end
 
 function onPoseEdge(pose, edge)
     if (pose == "doubleTap") then
-        onCalibrate()
+        if (jumpTimer == 0) then
+            onCalibrate()
+            myo.debug("Calibrated")
+            myo.vibrate("short")
+        end
     end
 
     if (didCalibrate == true) then
         if (edge == "on") then
             if (pose == "fist") then
                 onFist()
-            elseif (pose == "fingersSpread") then
-                onFingersSpread()
-
             end
         end
-
         if (edge == "off") then
             if (pose == "fist") then
                 offFist()
@@ -102,7 +139,4 @@ end
 
 function offFist()
     myo.mouse("left", "up")
-end
-
-function onFingersSpread()
 end
