@@ -1,0 +1,270 @@
+scriptId = "com.rocketLeagueConnector"
+    scriptTitle = "Rocket League Connector"
+    scriptDetailsUrl = "https://market.myo.com/app/5796b1afca753d4480a19beb"
+
+myo.setLockingPolicy("none")
+
+function onForegroundWindowChange(app, title)
+    if (app == "RocketLeague.exe") then
+        return true
+    end
+end
+
+function activeAppName()
+    return "Rocket League"
+end
+
+--CONSTANTS--
+RIGHT_THRESHOLD = .3
+LEFT_RIGHT_SEPERATOR= -2                 --at a certain point, myo switches between positive to negative values, this constant prevents a movement towards the right from being detected as left
+LEFT_THRESHOLD = -.23
+UP_THRESHOLD = .5
+DOWN_THRESHOLD = -.35
+SINGLE_JUMP_THRESHOLD = 2
+JUMP_TIMER = 150                         --Jumping is determined by how fast the user moves their hand outside the neutral zone and back in
+BETWEEN_DOUBLE_JUMP_TIME = 130           --Time to wait between double jumps
+if (myo.getArm() == "left") then
+    CRUISE_THRESHOLD = .18           -- greater than
+    INSIDE_ROLL_JUMP_ADDITION = .2    --Since the arm naturally rolls when rotating inside, additional leway must be given to detect jumping correctlyw
+else
+    CRUISE_THRESHOLD = -.2
+    INSIDE_ROLL_JUMP_ADDITION = -.25    --Since the arm naturally rolls when rotating inside, additional leway must be given to detect jumping correctly
+end
+
+--VARIABLES--
+didCalibrate = false                     --A pseudo Locking policy that unlocks once the myo has been calibrated
+wasUpOrDown = false
+firstFrameOutside = true
+readyToMoveInside = false
+whereOutside = ""
+timeOutside = 0
+timeInside = 0
+originRoll = 0
+originPitch = 0
+originYaw = 0
+
+function onPeriodic()
+    if (didCalibrate == true) then
+
+        accelX, accelY, accelZ = myo.getAccel()
+        yawMovement = myo.getYaw() - originYaw
+        rollMovement = myo.getRoll() - originRoll
+        pitchMovement = myo.getPitch() - originPitch
+        myo.keyboard("w", "down")
+        cruiseIsOn = false
+        insideRollMet = false
+
+        --Cruise
+        if (rollMovement < CRUISE_THRESHOLD) then
+            myo.keyboard("w", "up")
+            cruiseIsOn = true
+        end
+
+        --Left arm
+        if (myo.getArm() == "left") then
+            --Is CRUISE_THRESHOLD met
+            if (rollMovement > CRUISE_THRESHOLD) then
+                myo.keyboard("w", "up")
+                cruiseIsOn = true
+            end
+            --Is INSIDE_ROLL_JUMP_ADDITION met
+            if (myo.getArm() == "left") then
+                if (rollMovement > CRUISE_THRESHOLD + INSIDE_ROLL_JUMP_ADDITION) then
+                    insideRollMet = true
+                end
+            else
+                if (rollMovement < CRUISE_THRESHOLD + INSIDE_ROLL_JUMP_ADDITION) then
+                    insideRollMet = true
+                end
+            end
+
+        --Right arm
+        else
+            --Is CRUISE_THRESHOLD met
+            if (rollMovement < CRUISE_THRESHOLD) then
+                myo.keyboard("w", "up")
+                cruiseIsOn = true
+            end
+            --Is INSIDE_ROLL_JUMP_ADDITION met
+            if (rollMovement < CRUISE_THRESHOLD + INSIDE_ROLL_JUMP_ADDITION) then
+                insideRollMet = true
+            end
+        end
+
+        --Right Turn
+        if ((yawMovement > RIGHT_THRESHOLD) or (yawMovement < LEFT_RIGHT_SEPERATOR)) then
+            myo.keyboard("d", "down")
+            --Jump Detection
+            if ((insideRollMet or myo.getArm() == "right") and (cruiseIsOn)) then
+                if (firstFrameOutside) then
+                    timeOutside = myo.getTimeMilliseconds()
+                    readyToMoveInside = true
+                    firstFrameOutside = false
+                    whereOutside = "RIGHT"
+                end
+            end
+        end
+
+        --Left Turn
+        if ((yawMovement < LEFT_THRESHOLD) and (yawMovement > LEFT_RIGHT_SEPERATOR)) then
+            myo.keyboard("a", "down")
+            --Jump Detection
+            if ((insideRollMet or myo.getArm() == "left") and (cruiseIsOn)) then
+                if (firstFrameOutside) then
+                    timeOutside = myo.getTimeMilliseconds()
+                    readyToMoveInside = true
+                    firstFrameOutside = false
+                    whereOutside = "LEFT"
+                end
+            end
+        end
+
+        --Forward
+        if ((yawMovement < RIGHT_THRESHOLD) and (yawMovement > LEFT_THRESHOLD)) then
+            myo.keyboard("a", "up")
+            myo.keyboard("d", "up")
+        end
+
+        --Up/Back
+        if (pitchMovement > UP_THRESHOLD) then
+            myo.keyboard("w", "up")
+            myo.keyboard("s", "down")
+            wasUpOrDown = true
+            --Jump Detection
+            if (cruiseIsOn) then
+                if (firstFrameOutside) then
+                    timeOutside = myo.getTimeMilliseconds()
+                    readyToMoveInside = true
+                    firstFrameOutside = false
+                    whereOutside = "UP"
+                end
+            end
+        end
+
+        --Down
+        if (pitchMovement < DOWN_THRESHOLD) then
+            myo.keyboard("w", "down")
+            wasUpOrDown = true
+            --Jump Detection
+            if (cruiseIsOn) then
+                if (firstFrameOutside) then
+                    timeOutside = myo.getTimeMilliseconds()
+                    readyToMoveInside = true
+                    firstFrameOutside = false
+                    whereOutside = "DOWN"
+                end
+            end
+        end
+
+        --Releasing Up/Back and Down
+        if ((pitchMovement < UP_THRESHOLD) and (pitchMovement > DOWN_THRESHOLD)) then
+            if (wasUpOrDown) then
+                myo.keyboard("w", "up")
+                myo.keyboard("s", "up")
+                wasUpOrDown = false
+            end
+        end
+
+        --Checking For Return to Neutral Position
+        if ((yawMovement < RIGHT_THRESHOLD) and (yawMovement > LEFT_THRESHOLD) and (pitchMovement < UP_THRESHOLD) and (pitchMovement > DOWN_THRESHOLD)) then
+            if (readyToMoveInside) then
+                timeInside = myo.getTimeMilliseconds()
+                readyToMoveInside = false
+                firstFrameOutside = true
+            end
+        end
+
+        --Detecting Jump based on time
+        if (timeInside ~= 0) then
+            if (timeOutside ~= 0) then
+                if (timeInside - timeOutside < JUMP_TIMER) then
+                    jump(whereOutside)
+                    timeInside = 0
+                    timeOutside = 0
+                end
+            end
+        end
+
+        --single jump
+        if (accelX > SINGLE_JUMP_THRESHOLD) then
+            myo.mouse("right", "click")
+        end
+
+    end
+end
+
+function jump(direction)
+    myo.mouse("right", "click")
+    initialTime = myo.getTimeMilliseconds()
+    while (myo.getTimeMilliseconds() - initialTime < BETWEEN_DOUBLE_JUMP_TIME) do
+        --wait
+    end
+
+    flipButton = ""
+    if (direction == "RIGHT") then
+        flipButton = "d"
+    elseif (direction == "LEFT") then
+        flipButton = "a"
+    elseif (direction == "UP") then
+        flipButton = "s"
+    else
+        flipButton = "w"
+    end
+    myo.keyboard(flipButton, "down")
+    myo.mouse("right","click")
+    myo.keyboard(flipButton, "up")
+end
+
+function onActiveChange(isActive)
+end
+
+function onCalibrate()
+    originRoll = myo.getRoll()
+    originPitch = myo.getPitch()
+    originYaw = myo.getYaw()
+    didCalibrate = true
+end
+
+function onPoseEdge(pose, edge)
+    if (pose == "doubleTap") then
+        onCalibrate()
+    end
+    if (didCalibrate == true) then
+        if (edge == "on") then
+            if (pose == "fist") then
+                onFist()
+            end
+        end
+        if (edge == "off") then
+            if (pose == "fist") then
+                offFist()
+            end
+        end
+        if (edge == "on") then
+            if ((pose == "waveIn") or (pose == "waveOut")) then
+                onWave()
+            end
+        end
+        if (edge == "off") then
+            if ((pose == "waveIn") or (pose == "waveOut")) then
+                offWave()
+            end
+        end
+    end
+end
+
+function onFist()
+    myo.mouse("left", "down")
+end
+
+function offFist()
+    myo.mouse("left", "up")
+end
+
+function onWave()
+    myo.keyboard("left_shift","down")
+end
+
+function offWave()
+    myo.keyboard("left_shift","up")
+end
